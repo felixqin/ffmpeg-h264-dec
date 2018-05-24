@@ -22,9 +22,9 @@ include_directories(
         ffmpeg-src
 )
 
-add_executable(h264dec
+add_executable(ffmpegdec
         main.c
         decoder.c
         )
 
-target_link_libraries(h264dec ffmpeg_dec m)
+target_link_libraries(ffmpegdec ffmpeg_dec m)
