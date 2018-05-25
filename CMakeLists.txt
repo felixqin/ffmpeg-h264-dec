@@ -7,8 +7,10 @@ set(TOPDIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(WIN32)
     set(PLATFORM_DIR ${TOPDIR}/platform/mingw32)
+    set(COMPAT win32)
 else()
     set(PLATFORM_DIR ${TOPDIR}/platform/linux)
+    set(COMPAT gcc)
 endif()
 
 

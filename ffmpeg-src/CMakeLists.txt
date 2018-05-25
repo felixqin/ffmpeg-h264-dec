@@ -1,6 +1,7 @@
 
 include_directories(
         ./
+        compat/atomics/${COMPAT}
         ${PLATFORM_DIR}
 )
 

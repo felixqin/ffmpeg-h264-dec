@@ -26,10 +26,12 @@
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mem.h"
 
+#include "bytestream.h"
+#include "hevc.h"
 #include "h2645_parse.h"
 
 int ff_h2645_extract_rbsp(const uint8_t *src, int length,
-                          H2645NAL *nal)
+                          H2645RBSP *rbsp, H2645NAL *nal, int small_padding)
 {
     int i, si, di;
     uint8_t *dst;
@@ -80,19 +82,16 @@ int ff_h2645_extract_rbsp(const uint8_t *src, int length,
     }
 #endif /* HAVE_FAST_UNALIGNED */
 
-    if (i >= length - 1) { // no escaped 0
+    if (i >= length - 1 && small_padding) { // no escaped 0
         nal->data     =
         nal->raw_data = src;
         nal->size     =
         nal->raw_size = length;
         return length;
-    }
+    } else if (i > length)
+        i = length;
 
-    av_fast_malloc(&nal->rbsp_buffer, &nal->rbsp_buffer_size,
-                   length + AV_INPUT_BUFFER_PADDING_SIZE);
-    if (!nal->rbsp_buffer)
-        return AVERROR(ENOMEM);
-
+    nal->rbsp_buffer = &rbsp->rbsp_buffer[rbsp->rbsp_buffer_size];
     dst = nal->rbsp_buffer;
 
     memcpy(dst, src, i);
@@ -141,39 +140,39 @@ nsc:
     nal->size = di;
     nal->raw_data = src;
     nal->raw_size = si;
+    rbsp->rbsp_buffer_size += si;
+
     return si;
 }
 
 static const char *nal_unit_name(int nal_type)
 {
     switch(nal_type) {
-  	/*
-    case NAL_TRAIL_N    : return "TRAIL_N";
-    case NAL_TRAIL_R    : return "TRAIL_R";
-    case NAL_TSA_N      : return "TSA_N";
-    case NAL_TSA_R      : return "TSA_R";
-    case NAL_STSA_N     : return "STSA_N";
-    case NAL_STSA_R     : return "STSA_R";
-    case NAL_RADL_N     : return "RADL_N";
-    case NAL_RADL_R     : return "RADL_R";
-    case NAL_RASL_N     : return "RASL_N";
-    case NAL_RASL_R     : return "RASL_R";
-    case NAL_BLA_W_LP   : return "BLA_W_LP";
-    case NAL_BLA_W_RADL : return "BLA_W_RADL";
-    case NAL_BLA_N_LP   : return "BLA_N_LP";
-    case NAL_IDR_W_RADL : return "IDR_W_RADL";
-    case NAL_IDR_N_LP   : return "IDR_N_LP";
-    case NAL_CRA_NUT    : return "CRA_NUT";
-    case NAL_VPS        : return "VPS";
-    case NAL_SPS        : return "SPS";
-    case NAL_PPS        : return "PPS";
-    case NAL_AUD        : return "AUD";
-    case NAL_EOS_NUT    : return "EOS_NUT";
-    case NAL_EOB_NUT    : return "EOB_NUT";
-    case NAL_FD_NUT     : return "FD_NUT";
-    case NAL_SEI_PREFIX : return "SEI_PREFIX";
-    case NAL_SEI_SUFFIX : return "SEI_SUFFIX";
-    */
+    case HEVC_NAL_TRAIL_N    : return "TRAIL_N";
+    case HEVC_NAL_TRAIL_R    : return "TRAIL_R";
+    case HEVC_NAL_TSA_N      : return "TSA_N";
+    case HEVC_NAL_TSA_R      : return "TSA_R";
+    case HEVC_NAL_STSA_N     : return "STSA_N";
+    case HEVC_NAL_STSA_R     : return "STSA_R";
+    case HEVC_NAL_RADL_N     : return "RADL_N";
+    case HEVC_NAL_RADL_R     : return "RADL_R";
+    case HEVC_NAL_RASL_N     : return "RASL_N";
+    case HEVC_NAL_RASL_R     : return "RASL_R";
+    case HEVC_NAL_BLA_W_LP   : return "BLA_W_LP";
+    case HEVC_NAL_BLA_W_RADL : return "BLA_W_RADL";
+    case HEVC_NAL_BLA_N_LP   : return "BLA_N_LP";
+    case HEVC_NAL_IDR_W_RADL : return "IDR_W_RADL";
+    case HEVC_NAL_IDR_N_LP   : return "IDR_N_LP";
+    case HEVC_NAL_CRA_NUT    : return "CRA_NUT";
+    case HEVC_NAL_VPS        : return "VPS";
+    case HEVC_NAL_SPS        : return "SPS";
+    case HEVC_NAL_PPS        : return "PPS";
+    case HEVC_NAL_AUD        : return "AUD";
+    case HEVC_NAL_EOS_NUT    : return "EOS_NUT";
+    case HEVC_NAL_EOB_NUT    : return "EOB_NUT";
+    case HEVC_NAL_FD_NUT     : return "FD_NUT";
+    case HEVC_NAL_SEI_PREFIX : return "SEI_PREFIX";
+    case HEVC_NAL_SEI_SUFFIX : return "SEI_SUFFIX";
     default : return "?";
     }
 }
@@ -246,49 +245,81 @@ static int h264_parse_nal_header(H2645NAL *nal, void *logctx)
     return 1;
 }
 
+static int find_next_start_code(const uint8_t *buf, const uint8_t *next_avc)
+{
+    int i = 0;
+
+    if (buf + 3 >= next_avc)
+        return next_avc - buf;
+
+    while (buf + i + 3 < next_avc) {
+        if (buf[i] == 0 && buf[i + 1] == 0 && buf[i + 2] == 1)
+            break;
+        i++;
+    }
+    return i + 3;
+}
+
 int ff_h2645_packet_split(H2645Packet *pkt, const uint8_t *buf, int length,
                           void *logctx, int is_nalff, int nal_length_size,
-                          enum AVCodecID codec_id)
+                          enum AVCodecID codec_id, int small_padding)
 {
+    GetByteContext bc;
     int consumed, ret = 0;
+    int next_avc = is_nalff ? 0 : length;
+    int64_t padding = small_padding ? 0 : MAX_MBPAIR_SIZE;
 
+    bytestream2_init(&bc, buf, length);
+    av_fast_padded_malloc(&pkt->rbsp.rbsp_buffer, &pkt->rbsp.rbsp_buffer_alloc_size, length + padding);
+    if (!pkt->rbsp.rbsp_buffer)
+        return AVERROR(ENOMEM);
+
+    pkt->rbsp.rbsp_buffer_size = 0;
     pkt->nb_nals = 0;
-    while (length >= 4) {
+    while (bytestream2_get_bytes_left(&bc) >= 4) {
         H2645NAL *nal;
         int extract_length = 0;
         int skip_trailing_zeros = 1;
 
-        if (is_nalff) {
-            int i;
-            for (i = 0; i < nal_length_size; i++)
-                extract_length = (extract_length << 8) | buf[i];
-            buf    += nal_length_size;
-            length -= nal_length_size;
+        if (bytestream2_tell(&bc) == next_avc) {
+            int i = 0;
+            extract_length = get_nalsize(nal_length_size,
+                                         bc.buffer, bytestream2_get_bytes_left(&bc), &i, logctx);
+            if (extract_length < 0)
+                return extract_length;
 
-            if (extract_length > length) {
-                av_log(logctx, AV_LOG_ERROR, "Invalid NAL unit size.\n");
-                return AVERROR_INVALIDDATA;
-            }
+            bytestream2_skip(&bc, nal_length_size);
+
+            next_avc = bytestream2_tell(&bc) + extract_length;
         } else {
+            int buf_index;
+
+            if (bytestream2_tell(&bc) > next_avc)
+                av_log(logctx, AV_LOG_WARNING, "Exceeded next NALFF position, re-syncing.\n");
+
             /* search start code */
-            while (buf[0] != 0 || buf[1] != 0 || buf[2] != 1) {
-                ++buf;
-                --length;
-                if (length < 4) {
-                    if (pkt->nb_nals > 0) {
-                        // No more start codes: we discarded some irrelevant
-                        // bytes at the end of the packet.
-                        return 0;
-                    } else {
-                        av_log(logctx, AV_LOG_ERROR, "No start code is found.\n");
-                        return AVERROR_INVALIDDATA;
-                    }
+            buf_index = find_next_start_code(bc.buffer, buf + next_avc);
+
+            bytestream2_skip(&bc, buf_index);
+
+            if (!bytestream2_get_bytes_left(&bc)) {
+                if (pkt->nb_nals > 0) {
+                    // No more start codes: we discarded some irrelevant
+                    // bytes at the end of the packet.
+                    return 0;
+                } else {
+                    av_log(logctx, AV_LOG_ERROR, "No start code is found.\n");
+                    return AVERROR_INVALIDDATA;
                 }
             }
 
-            buf           += 3;
-            length        -= 3;
-            extract_length = length;
+            extract_length = FFMIN(bytestream2_get_bytes_left(&bc), next_avc - bytestream2_tell(&bc));
+
+            if (bytestream2_tell(&bc) >= next_avc) {
+                /* skip to the start of the next NAL */
+                bytestream2_skip(&bc, next_avc - bytestream2_tell(&bc));
+                continue;
+            }
         }
 
         if (pkt->nals_allocated < pkt->nb_nals + 1) {
@@ -312,16 +343,22 @@ int ff_h2645_packet_split(H2645Packet *pkt, const uint8_t *buf, int length,
         }
         nal = &pkt->nals[pkt->nb_nals];
 
-        consumed = ff_h2645_extract_rbsp(buf, extract_length, nal);
+        consumed = ff_h2645_extract_rbsp(bc.buffer, extract_length, &pkt->rbsp, nal, small_padding);
         if (consumed < 0)
             return consumed;
 
+        if (is_nalff && (extract_length != consumed) && extract_length)
+            av_log(logctx, AV_LOG_DEBUG,
+                   "NALFF: Consumed only %d bytes instead of %d\n",
+                   consumed, extract_length);
+
         pkt->nb_nals++;
 
+        bytestream2_skip(&bc, consumed);
+
         /* see commit 3566042a0 */
-        if (consumed < length - 3 &&
-            buf[consumed]     == 0x00 && buf[consumed + 1] == 0x00 &&
-            buf[consumed + 2] == 0x01 && buf[consumed + 3] == 0xE0)
+        if (bytestream2_get_bytes_left(&bc) >= 4 &&
+            bytestream2_peek_be32(&bc) == 0x000001E0)
             skip_trailing_zeros = 0;
 
         nal->size_bits = get_bit_length(nal, skip_trailing_zeros);
@@ -341,9 +378,6 @@ int ff_h2645_packet_split(H2645Packet *pkt, const uint8_t *buf, int length,
             }
             pkt->nb_nals--;
         }
-
-        buf    += consumed;
-        length -= consumed;
     }
 
     return 0;
@@ -353,9 +387,10 @@ void ff_h2645_packet_uninit(H2645Packet *pkt)
 {
     int i;
     for (i = 0; i < pkt->nals_allocated; i++) {
-        av_freep(&pkt->nals[i].rbsp_buffer);
         av_freep(&pkt->nals[i].skipped_bytes_pos);
     }
     av_freep(&pkt->nals);
     pkt->nals_allocated = 0;
+    av_freep(&pkt->rbsp.rbsp_buffer);
+    pkt->rbsp.rbsp_buffer_alloc_size = pkt->rbsp.rbsp_buffer_size = 0;
 }
