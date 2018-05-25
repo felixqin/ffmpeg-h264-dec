@@ -15,6 +15,7 @@ cd ${THISDIR}/../${FFDIR}
     --disable-decoders \
     --enable-decoder=h264 \
     --enable-decoder=hevc \
+    --enable-decoder=mjpeg \
     --disable-parsers \
     --disable-demuxers \
     --disable-filters \
