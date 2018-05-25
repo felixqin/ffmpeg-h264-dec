@@ -16,30 +16,17 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVUTIL_WCHAR_FILENAME_H
-#define AVUTIL_WCHAR_FILENAME_H
+#ifndef AVCODEC_BSWAPDSP_H
+#define AVCODEC_BSWAPDSP_H
 
-#if defined(_WIN32) && !defined(__MINGW32CE__)
-#include <windows.h>
-#include "mem.h"
+#include <stdint.h>
 
-av_warn_unused_result
-static inline int utf8towchar(const char *filename_utf8, wchar_t **filename_w)
-{
-    int num_chars;
-    num_chars = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, filename_utf8, -1, NULL, 0);
-    if (num_chars <= 0) {
-        *filename_w = NULL;
-        return 0;
-    }
-    *filename_w = (wchar_t *)av_mallocz_array(num_chars, sizeof(wchar_t));
-    if (!*filename_w) {
-        errno = ENOMEM;
-        return -1;
-    }
-    MultiByteToWideChar(CP_UTF8, 0, filename_utf8, -1, *filename_w, num_chars);
-    return 0;
-}
-#endif
+typedef struct BswapDSPContext {
+    void (*bswap_buf)(uint32_t *dst, const uint32_t *src, int w);
+    void (*bswap16_buf)(uint16_t *dst, const uint16_t *src, int len);
+} BswapDSPContext;
 
-#endif /* AVUTIL_WCHAR_FILENAME_H */
+void ff_bswapdsp_init(BswapDSPContext *c);
+void ff_bswapdsp_init_x86(BswapDSPContext *c);
+
+#endif /* AVCODEC_BSWAPDSP_H */

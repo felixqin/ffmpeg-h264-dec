@@ -42,7 +42,6 @@
 #include "dynarray.h"
 #include "intreadwrite.h"
 #include "mem.h"
-#include "internal.h"
 
 #ifdef MALLOC_PREFIX
 

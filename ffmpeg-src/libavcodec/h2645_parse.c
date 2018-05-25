@@ -26,6 +26,7 @@
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mem.h"
 
+#include "hevc.h"
 #include "h2645_parse.h"
 
 int ff_h2645_extract_rbsp(const uint8_t *src, int length,
@@ -147,7 +148,6 @@ nsc:
 static const char *nal_unit_name(int nal_type)
 {
     switch(nal_type) {
-  	/*
     case NAL_TRAIL_N    : return "TRAIL_N";
     case NAL_TRAIL_R    : return "TRAIL_R";
     case NAL_TSA_N      : return "TSA_N";
@@ -173,7 +173,6 @@ static const char *nal_unit_name(int nal_type)
     case NAL_FD_NUT     : return "FD_NUT";
     case NAL_SEI_PREFIX : return "SEI_PREFIX";
     case NAL_SEI_SUFFIX : return "SEI_SUFFIX";
-    */
     default : return "?";
     }
 }

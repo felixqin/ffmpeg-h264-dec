@@ -1,4 +1,6 @@
 
+add_definitions(-DHAVE_AV_CONFIG_H)
+
 include_directories(
         ./
         ${PLATFORM_DIR}

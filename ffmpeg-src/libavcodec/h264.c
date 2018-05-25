@@ -1568,7 +1568,7 @@ static int is_extra(const uint8_t *buf, int buf_size)
     return 1;
 }
 
-int h264_decode_frame(AVCodecContext *avctx, void *data,
+static int h264_decode_frame(AVCodecContext *avctx, void *data,
                              int *got_frame, AVPacket *avpkt)
 {
     const uint8_t *buf = avpkt->data;
